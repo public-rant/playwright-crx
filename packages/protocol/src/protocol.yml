@@ -1350,10 +1350,16 @@ Page:
     registerLocatorHandler:
       parameters:
         selector: string
+        noWaitAfter: boolean?
       returns:
         uid: number
 
     resolveLocatorHandlerNoReply:
+      parameters:
+        uid: number
+        remove: boolean?
+
+    unregisterLocatorHandler:
       parameters:
         uid: number
 
@@ -3548,4 +3554,4 @@ JsonPipe:
 
     closed:
       parameters:
-        error: SerializedError?
+        reason: string?

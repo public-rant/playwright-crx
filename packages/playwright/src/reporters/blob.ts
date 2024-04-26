@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { ManualPromise, calculateSha1, createGuid, getUserAgent, removeFolders } from 'playwright-core/lib/utils';
+import { ManualPromise, calculateSha1, createGuid, getUserAgent, removeFolders, sanitizeForFilePath } from 'playwright-core/lib/utils';
 import { mime } from 'playwright-core/lib/utilsBundle';
 import { Readable } from 'stream';
 import type { EventEmitter } from 'events';
@@ -30,9 +30,11 @@ type BlobReporterOptions = {
   configDir: string;
   outputDir?: string;
   fileName?: string;
+  outputFile?: string;
+  _commandHash: string;
 };
 
-export const currentBlobReportVersion = 1;
+export const currentBlobReportVersion = 2;
 
 export type BlobReportMetadata = {
   version: number;
@@ -47,7 +49,7 @@ export class BlobReporter extends TeleReporterEmitter {
   private readonly _attachments: { originalPath: string, zipEntryPath: string }[] = [];
   private readonly _options: BlobReporterOptions;
   private readonly _salt: string;
-  private _reportName!: string;
+  private _config!: FullConfig;
 
   constructor(options: BlobReporterOptions) {
     super(message => this._messages.push(message));
@@ -70,26 +72,22 @@ export class BlobReporter extends TeleReporterEmitter {
       params: metadata
     });
 
-    this._reportName = this._computeReportName(config);
+    this._config = config;
     super.onConfigure(config);
   }
 
   override async onEnd(result: FullResult): Promise<void> {
     await super.onEnd(result);
 
-    const outputDir = resolveReporterOutputPath('blob-report', this._options.configDir, this._options.outputDir);
-    if (!process.env.PWTEST_BLOB_DO_NOT_REMOVE)
-      await removeFolders([outputDir]);
-    await fs.promises.mkdir(outputDir, { recursive: true });
+    const zipFileName = await this._prepareOutputFile();
 
     const zipFile = new yazl.ZipFile();
     const zipFinishPromise = new ManualPromise<undefined>();
     const finishPromise = zipFinishPromise.catch(e => {
-      throw new Error(`Failed to write report ${this._reportName}: ` + e.message);
+      throw new Error(`Failed to write report ${zipFileName}: ` + e.message);
     });
 
     (zipFile as any as EventEmitter).on('error', error => zipFinishPromise.reject(error));
-    const zipFileName = path.join(outputDir, this._reportName);
     zipFile.outputStream.pipe(fs.createWriteStream(zipFileName)).on('close', () => {
       zipFinishPromise.resolve(undefined);
     }).on('error', error => zipFinishPromise.reject(error));
@@ -108,10 +106,26 @@ export class BlobReporter extends TeleReporterEmitter {
     await finishPromise;
   }
 
-  private _computeReportName(config: FullConfig) {
-    if (this._options.fileName)
-      return this._options.fileName;
+  private async _prepareOutputFile() {
+    let outputFile = reportOutputFileFromEnv();
+    if (!outputFile && this._options.outputFile)
+      outputFile = path.resolve(this._options.configDir, this._options.outputFile);
+    // Explicit `outputFile` overrides `outputDir` and `fileName` options.
+    if (!outputFile) {
+      const reportName = this._options.fileName || process.env[`PLAYWRIGHT_BLOB_OUTPUT_NAME`] || this._defaultReportName(this._config);
+      const outputDir = resolveReporterOutputPath('blob-report', this._options.configDir, this._options.outputDir ?? reportOutputDirFromEnv());
+      if (!process.env.PWTEST_BLOB_DO_NOT_REMOVE)
+        await removeFolders([outputDir]);
+      outputFile = path.resolve(outputDir, reportName);
+    }
+    await fs.promises.mkdir(path.dirname(outputFile), { recursive: true });
+    return outputFile;
+  }
+
+  private _defaultReportName(config: FullConfig) {
     let reportName = 'report';
+    if (this._options._commandHash)
+      reportName += '-' + sanitizeForFilePath(this._options._commandHash);
     if (config.shard) {
       const paddedNumber = `${config.shard.current}`.padStart(`${config.shard.total}`.length, '0');
       reportName = `${reportName}-${paddedNumber}`;
@@ -134,4 +148,16 @@ export class BlobReporter extends TeleReporterEmitter {
       };
     });
   }
+}
+
+function reportOutputDirFromEnv(): string | undefined {
+  if (process.env[`PLAYWRIGHT_BLOB_OUTPUT_DIR`])
+    return path.resolve(process.cwd(), process.env[`PLAYWRIGHT_BLOB_OUTPUT_DIR`]);
+  return undefined;
+}
+
+function reportOutputFileFromEnv(): string | undefined {
+  if (process.env[`PLAYWRIGHT_BLOB_OUTPUT_FILE`])
+    return path.resolve(process.cwd(), process.env[`PLAYWRIGHT_BLOB_OUTPUT_FILE`]);
+  return undefined;
 }

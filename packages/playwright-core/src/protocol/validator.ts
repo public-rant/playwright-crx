@@ -1046,14 +1046,20 @@ scheme.PageGoForwardResult = tObject({
 });
 scheme.PageRegisterLocatorHandlerParams = tObject({
   selector: tString,
+  noWaitAfter: tOptional(tBoolean),
 });
 scheme.PageRegisterLocatorHandlerResult = tObject({
   uid: tNumber,
 });
 scheme.PageResolveLocatorHandlerNoReplyParams = tObject({
   uid: tNumber,
+  remove: tOptional(tBoolean),
 });
 scheme.PageResolveLocatorHandlerNoReplyResult = tOptional(tObject({}));
+scheme.PageUnregisterLocatorHandlerParams = tObject({
+  uid: tNumber,
+});
+scheme.PageUnregisterLocatorHandlerResult = tOptional(tObject({}));
 scheme.PageReloadParams = tObject({
   timeout: tOptional(tNumber),
   waitUntil: tOptional(tType('LifecycleEvent')),
@@ -2586,7 +2592,7 @@ scheme.JsonPipeMessageEvent = tObject({
   message: tAny,
 });
 scheme.JsonPipeClosedEvent = tObject({
-  error: tOptional(tType('SerializedError')),
+  reason: tOptional(tString),
 });
 scheme.JsonPipeSendParams = tObject({
   message: tAny,
